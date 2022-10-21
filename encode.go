@@ -77,31 +77,31 @@ import (
 //
 // Examples of struct field tags and their meanings:
 //
-//   // Field appears in JSON as key "myName".
-//   Field int `json:"myName"`
+//	// Field appears in JSON as key "myName".
+//	Field int `json:"myName"`
 //
-//   // Field appears in JSON as key "myName" and
-//   // the field is omitted from the object if its value is empty,
-//   // as defined above.
-//   Field int `json:"myName,omitempty"`
+//	// Field appears in JSON as key "myName" and
+//	// the field is omitted from the object if its value is empty,
+//	// as defined above.
+//	Field int `json:"myName,omitempty"`
 //
-//   // Field appears in JSON as key "Field" (the default), but
-//   // the field is skipped if empty.
-//   // Note the leading comma.
-//   Field int `json:",omitempty"`
+//	// Field appears in JSON as key "Field" (the default), but
+//	// the field is skipped if empty.
+//	// Note the leading comma.
+//	Field int `json:",omitempty"`
 //
-//   // Field is ignored by this package.
-//   Field int `json:"-"`
+//	// Field is ignored by this package.
+//	Field int `json:"-"`
 //
-//   // Field appears in JSON as key "-".
-//   Field int `json:"-,"`
+//	// Field appears in JSON as key "-".
+//	Field int `json:"-,"`
 //
 // The "string" option signals that a field is stored as JSON inside a
 // JSON-encoded string. It applies only to fields of string, floating point,
 // integer, or boolean types. This extra level of encoding is sometimes used
 // when communicating with JavaScript programs:
 //
-//    Int64String int64 `json:",string"`
+//	Int64String int64 `json:",string"`
 //
 // The key name will be used if it's a non-empty string consisting of
 // only Unicode letters, digits, and ASCII punctuation except quotation
@@ -154,7 +154,6 @@ import (
 // JSON cannot represent cyclic data structures and Marshal does not
 // handle them. Passing cyclic structures to Marshal will result in
 // an error.
-//
 func Marshal(v any) ([]byte, error) {
 	e := newEncodeState()
 
@@ -175,6 +174,36 @@ func MarshalSafeCollections(v any) ([]byte, error) {
 	e := newEncodeState()
 
 	err := e.marshal(v, encOpts{escapeHTML: true, nilSafeCollection: true})
+	if err != nil {
+		return nil, err
+	}
+	buf := append([]byte(nil), e.Bytes()...)
+
+	encodeStatePool.Put(e)
+
+	return buf, nil
+}
+
+func NilSafeCollection(b bool) func(opt *encOpts) {
+	return func(opt *encOpts) {
+		opt.nilSafeCollection = b
+	}
+}
+func DefaultCaseCamelLower(b bool) func(opt *encOpts) {
+	return func(opt *encOpts) {
+		opt.defaultCaseCamelLower = b
+	}
+}
+
+func MarshalWithOpt(v any, opts ...func(opt *encOpts)) ([]byte, error) {
+	e := newEncodeState()
+
+	encOpt := encOpts{escapeHTML: true}
+	for _, opt := range opts {
+		opt(&encOpt)
+	}
+
+	err := e.marshal(v, encOpt)
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +413,9 @@ type encOpts struct {
 	// nilSafeCollection marshals a nil slices and maps into '[]' and '{}'
 	// respectfully instead of 'null'
 	nilSafeCollection bool
+	// defaultCaseSnake if json tag is empty, field name will default encode to caseCamelLower style
+	// by change the first letter to lower
+	defaultCaseCamelLower bool
 }
 
 type encoderFunc func(e *encodeState, v reflect.Value, opts encOpts)
@@ -771,6 +803,22 @@ FieldLoop:
 		}
 		e.WriteByte(next)
 		next = ','
+
+		if opts.defaultCaseCamelLower && !f.tag {
+			if opts.escapeHTML {
+				var buf bytes.Buffer
+				buf.WriteString(`"`)
+				f.nameBytes = []byte(strings.ToLower(f.name[0:1]) + f.name[1:len(f.name)])
+				HTMLEscape(&buf, f.nameBytes)
+				buf.WriteString(`":`)
+				f.nameEscHTML = buf.String()
+			} else {
+				f.name = strings.ToLower(f.name[0:1]) + f.name[1:len(f.name)]
+				f.nameNonEsc = `"` + f.name + `":`
+			}
+			f.tag = true
+		}
+
 		if opts.escapeHTML {
 			e.WriteString(f.nameEscHTML)
 		} else {

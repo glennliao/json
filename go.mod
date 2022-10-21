@@ -1,3 +1,3 @@
-module github.com/homelight/json
+module github.com/glennliao/json
 
 go 1.18
